@@ -1,20 +1,27 @@
-const express = require('express');
-const http = require('http');
-const { Server } = require('socket.io');
+const express = require("express");
+const http = require("http");
+const { Server } = require("socket.io");
+const cors = require("cors");
 
 const app = express();
+app.use(cors());
+app.use(express.json());
+
 const server = http.createServer(app);
 
 const io = new Server(server, {
-  cors: { origin: "*" }
+  cors: {
+    origin: "*",
+    methods: ["GET", "POST"],
+  },
 });
 
 let onlineUsers = {};
 
-io.on('connection', socket => {
+io.on("connection", (socket) => {
   console.log("New client connected:", socket.id);
 
-  socket.on("register", username => {
+  socket.on("register", (username) => {
     onlineUsers[username] = socket.id;
     io.emit("online-users", Object.keys(onlineUsers));
   });
