@@ -2,6 +2,7 @@ const express = require("express");
 const http = require("http");
 const { Server } = require("socket.io");
 const cors = require("cors");
+const { prisma } = require("./script");
 
 const app = express();
 app.use(cors());
@@ -16,37 +17,65 @@ const io = new Server(server, {
   },
 });
 
-let onlineUsers = {};
-
 io.on("connection", (socket) => {
   console.log("New client connected:", socket.id);
 
-  socket.on("register", (username) => {
-    onlineUsers[username] = socket.id;
-    io.emit("online-users", Object.keys(onlineUsers));
+  //   data has username, isonline
+  socket.on("register", async (data) => {
+    const user = await prisma.user.findUnique({
+      where: { username: data.username },
+    });
+
+    if (user) {
+      await prisma.user.update({
+        where: { id: user.id },
+        data: {
+          isOnline: true,
+          mysocketid: socket.id,
+        },
+      });
+    } else {
+      await prisma.user.create({
+        data: {
+          username: data.username,
+          isOnline: true,
+          mysocketid: socket.id,
+        },
+      });
+    }
+    console.log("User registered/updated:", data.username);
+
+    // send all data
+    io.emit( "online-users",await prisma.user.findMany({ where: { isOnline: true } }));
   });
 
-  socket.on("call-user", ({ from, to }) => {
-    if (onlineUsers[to]) {
-      io.to(onlineUsers[to]).emit("incoming-call", { from });
+  //   user a ------> user b
+  socket.on("call-user", async ({ from, to }) => {
+    const user = await prisma.user.findUnique({ where: { username: to } });
+    if (user) {
+      io.to(user.mysocketid).emit("incoming-call", { from });
     }
   });
 
-  socket.on("call-response", ({ from, to, accepted }) => {
-    if (onlineUsers[to]) {
-      io.to(onlineUsers[to]).emit("call-response", { from, accepted });
+  // user b ------> user a
+  socket.on("call-response", async ({ from, to, accepted }) => {
+    const user = await prisma.user.findUnique({ where: { username: to } });
+    if (user) {
+      io.to(user.mysocketid).emit("call-response", { from, accepted });
     }
   });
 
-  socket.on("disconnect", () => {
-    for (let user in onlineUsers) {
-      if (onlineUsers[user] === socket.id) {
-        delete onlineUsers[user];
-        break;
-      }
-    }
-    io.emit("online-users", Object.keys(onlineUsers));
+  socket.on("disconnect", async() => {
     console.log("Client disconnected:", socket.id);
+    const user = await prisma.user.findFirst({ where: { mysocketid: socket.id } });
+    if (user) {
+      await prisma.user.update({
+        where: { id: user.id },
+        data: { isOnline: false, mysocketid: null },
+      });
+    }
+    io.emit("online-users", await prisma.user.findMany({ where: { isOnline: true } }));
+    
   });
 });
 
